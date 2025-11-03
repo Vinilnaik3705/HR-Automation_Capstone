@@ -171,8 +171,8 @@ Status Auto-Update → Candidate Notification → Analytics
 
 ## 👥 Contributors
 
-- **D Vinil Naik** - Project Lead & Full Stack Development
-- **Aarav Raj** - AI Integration & Backend Development
+- **D Vinil Naik** 
+- **Aarav Raj** 
 
 ## 📄 License
 
