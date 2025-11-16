@@ -50,16 +50,24 @@ try:
     OpenAIClient = "openai_v2"
 except Exception:
     try:
-        import openai  #
+        import openai  
         OpenAIClient = "openai_v1"
     except Exception:
         OpenAIClient = None
 
-# Database Configuration
+ADMIN_ROLES = {"Admin", "HR Manager", "Tech Lead", "Team Manager", "Student"}
+
+def is_admin() -> bool:
+    return bool(st.session_state.get("user")) and str(st.session_state.user.get("role", "")).lower() in ADMIN_ROLES
+
+def require_admin(feature_name: str) -> bool:
+    if not is_admin():
+        st.error(f"⛔ You don't have permission to access **{feature_name}**.")
+        return False
+    return True
 
 @st.cache_resource
 def get_db_connection():
-    """Create and return a database connection"""
     try:
         if os.path.exists("secrets.toml"):
             secrets = toml.load("secrets.toml")
@@ -80,7 +88,6 @@ def get_db_connection():
         return None
 
 def log_user_action(action: str, description: str = ""):
-    """Log user actions to database"""
     conn = get_db_connection()
     if conn and 'user' in st.session_state:
         try:
@@ -94,7 +101,6 @@ def log_user_action(action: str, description: str = ""):
             print(f"Logging error: {e}")
 
 def save_upload_session(total_files: int, skills_text: str, session_id: str):
-    """Save upload session to database"""
     conn = get_db_connection()
     if conn and 'user' in st.session_state:
         try:
@@ -108,7 +114,6 @@ def save_upload_session(total_files: int, skills_text: str, session_id: str):
             print(f"Error saving upload session: {e}")
 
 def update_upload_session(session_id: str, processed: int, failed: int, status: str):
-    """Update upload session progress"""
     conn = get_db_connection()
     if conn:
         try:
@@ -123,40 +128,87 @@ def update_upload_session(session_id: str, processed: int, failed: int, status: 
             print(f"Error updating upload session: {e}")
 
 def save_resume_data(file_data: Dict, session_id: str):
-    """Save parsed resume data to database"""
     conn = get_db_connection()
-    if conn and 'user' in st.session_state:
-        try:
-            with conn.cursor() as cur:
+    if not (conn and 'user' in st.session_state):
+        return False
+
+    user_id = st.session_state.user['id']
+    filename = file_data['File']
+    file_size = len(file_data.get('raw_text', ''))
+    file_type = os.path.splitext(filename)[1][1:]
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM resume_files
+                WHERE user_id = %s AND filename = %s
+                ORDER BY upload_date DESC
+                LIMIT 1
+            """, (user_id, filename))
+            row = cur.fetchone()
+
+            if row:
+                file_id = row[0]
+
+                cur.execute("""
+                    UPDATE resume_files
+                    SET file_size = %s,
+                        file_type = %s,
+                        session_id = %s,
+                        processed = TRUE,
+                        upload_date = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (file_size, file_type, session_id, file_id))
+
+                cur.execute("""
+                    UPDATE resume_data
+                    SET candidate_name = %s,
+                        candidate_email = %s,
+                        candidate_phone = %s,
+                        skills = %s,
+                        extracted_text = %s,
+                        raw_parsed_data = %s
+                    WHERE resume_file_id = %s AND user_id = %s
+                """, (
+                    file_data['Name'],
+                    file_data['Email'],
+                    file_data['Mobile'],
+                    file_data['Skills'],
+                    file_data.get('raw_text', ''),
+                    json.dumps(file_data),
+                    file_id,
+                    user_id
+                ))
+
+            else:
                 cur.execute("""
                     INSERT INTO resume_files (user_id, filename, file_size, file_type, session_id, processed)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING id
-                """, (st.session_state.user['id'], file_data['File'], 
-                      len(file_data.get('raw_text', '')), 
-                      os.path.splitext(file_data['File'])[1][1:], 
-                      session_id, True))
-                
+                """, (user_id, filename, file_size, file_type, session_id, True))
                 file_id = cur.fetchone()[0]
-                
+
                 cur.execute("""
                     INSERT INTO resume_data (resume_file_id, user_id, candidate_name, candidate_email, 
-                                           candidate_phone, skills, extracted_text, raw_parsed_data)
+                                             candidate_phone, skills, extracted_text, raw_parsed_data)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (file_id, st.session_state.user['id'], file_data['Name'], file_data['Email'],
-                      file_data['Mobile'], file_data['Skills'], file_data.get('raw_text', ''),
-                      json.dumps(file_data)))
-                
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"Error saving resume data: {e}")
-            conn.rollback()
-            return False
+                """, (
+                    file_id, user_id,
+                    file_data['Name'], file_data['Email'], file_data['Mobile'],
+                    file_data['Skills'], file_data.get('raw_text', ''),
+                    json.dumps(file_data)
+                ))
+
+        conn.commit()
+        return True
+
+    except Exception as e:
+        print(f"Error saving (upserting) resume data: {e}")
+        conn.rollback()
+        return False
 
 def save_matching_session(jd_text: str, req_skills: str, use_faiss: bool, skill_weight: float, 
                          shortlist_count: int, results: List[Dict]):
-    """Save matching session to database"""
     conn = get_db_connection()
     if conn and 'user' in st.session_state:
         try:
@@ -176,7 +228,6 @@ def save_matching_session(jd_text: str, req_skills: str, use_faiss: bool, skill_
             return False
 
 def save_chat_history(prompt: str, response: str, model: str, context: str = ""):
-    """Save chat history to database"""
     conn = get_db_connection()
     if conn and 'user' in st.session_state:
         try:
@@ -192,7 +243,6 @@ def save_chat_history(prompt: str, response: str, model: str, context: str = "")
             return False
 
 def get_user_history():
-    """Get user's previous sessions and data"""
     conn = get_db_connection()
     if conn and 'user' in st.session_state:
         try:
@@ -233,7 +283,6 @@ def get_user_history():
             return None
 
 def get_user_resumes():
-    """Get all resumes for current user"""
     conn = get_db_connection()
     if conn and 'user' in st.session_state:
         try:
@@ -251,11 +300,7 @@ def get_user_resumes():
             print(f"Error getting user resumes: {e}")
             return []
 
-# -----------------------------
-# Authentication System with Registration
-# -----------------------------
 def setup_authentication():
-    """Simple authentication system"""
     if 'user' not in st.session_state:
         st.session_state.user = None
     if 'authenticated' not in st.session_state:
@@ -264,7 +309,6 @@ def setup_authentication():
         st.session_state.show_register = False
 
 def register_user(username: str, password: str, email: str):
-    """Register a new user"""
     conn = None
     try:
         conn = get_db_connection()
@@ -297,7 +341,6 @@ def register_user(username: str, password: str, email: str):
         return False
 
 def login_user(username: str, password: str):
-    """Authenticate user"""
     conn = None
     try:
         conn = get_db_connection()
@@ -325,7 +368,6 @@ def login_user(username: str, password: str):
         return False
 
 def logout_user():
-    """Logout user"""
     if 'user' in st.session_state:
         log_user_action("logout", f"User {st.session_state.user['username']} logged out")
     st.session_state.user = None
@@ -335,9 +377,6 @@ def logout_user():
     st.session_state.scored_results = None
     st.session_state.show_register = False
 
-# -----------------------------
-# Regex / Normalization / Heuristics
-# -----------------------------
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 PHONE_RE = re.compile(
     r"(\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}"
@@ -499,9 +538,6 @@ def extract_skills(text: str, skills_list: List[str]) -> List[str]:
             skills.append(skill)
     return sorted(list(set(skills)))
 
-# -----------------------------
-# File text extraction
-# -----------------------------
 def extract_text_from_pdf_path(pdf_path: str) -> str:
     if fitz is None:
         return "__ERROR__: PyMuPDF (fitz) not installed"
@@ -544,9 +580,6 @@ def extract_text_from_uploaded(uploaded_file) -> Tuple[str, str]:
             pass
     return text, uploaded_file.name
 
-# -----------------------------
-# Embeddings / Similarity
-# -----------------------------
 _embedder_cache = {"model": None}
 
 def get_embedder():
@@ -619,9 +652,6 @@ def compute_text_similarities(jd_text: str, candidate_texts: List[str], use_fais
 
     return jaccard_similarity(jd_text, candidate_texts)
 
-# -----------------------------
-# Resume processing (row creation)
-# -----------------------------
 def process_text_to_row(text: str, filename: str, skills_list: List[str]) -> Dict[str, Any]:
     if text.startswith("__ERROR__"):
         return {
@@ -658,9 +688,6 @@ def compute_skill_match(required: List[str], candidate_skills_csv: str) -> float
     inter = set(cand) & set(req)
     return len(inter) / len(set(req))
 
-# -----------------------------
-# OpenAI Chatbot
-# -----------------------------
 CHAT_SYSTEM_PROMPT = (
     "You are a precise resume analysis assistant. You will receive a user request and a CONTEXT "
     "containing snippets of resume text. Answer strictly using only the provided context. "
@@ -725,9 +752,6 @@ def ask_openai(prompt: str, context: str, model: str = "gpt-4o-mini", api_key: O
     except Exception as e:
         raise
 
-# -----------------------------
-# Streamlit App State Management
-# -----------------------------
 def initialize_session_state():
     if 'raw_texts' not in st.session_state:
         st.session_state.raw_texts = {}
@@ -741,6 +765,8 @@ def initialize_session_state():
         st.session_state.skills_list = DEFAULT_SKILLS.copy()
     if 'shortlist_count' not in st.session_state:
         st.session_state.shortlist_count = 5
+    if 'req_skills_list' not in st.session_state:
+        st.session_state.req_skills_list = []
 
 DEFAULT_SKILLS = [
     'Python','Data Analysis','Machine Learning','Communication','Project Management','Deep Learning','SQL',
@@ -749,9 +775,6 @@ DEFAULT_SKILLS = [
     'HTML','CSS','MongoDB','MySQL','PostgreSQL','NoSQL'
 ]
 
-# -----------------------------
-# Streamlit UI Components
-# -----------------------------
 def main():
     st.set_page_config(
         page_title="Resume Parser & Analyzer",
@@ -768,7 +791,6 @@ def main():
         show_main_application()
 
 def show_login_section():
-    """Show login interface with registration option"""
     st.title("🔐 Resume Analyzer")
     
     tab1, tab2 = st.tabs(["Login", "Register"])
@@ -818,7 +840,6 @@ def show_login_section():
         st.info("**Already have an account?** Switch to the **Login** tab to sign in!")
 
 def show_main_application():
-    """Main application after login"""
     st.title(f"📄 Resume Parser & Analyzer")
     st.write(f"Welcome **{st.session_state.user['username']}**!")
     
@@ -973,7 +994,8 @@ def show_parse_section():
     if st.session_state.results_rows:
         st.subheader("Current Session Results")
         df = pd.DataFrame(st.session_state.results_rows)
-        st.dataframe(df, use_container_width=True)
+        df_view = df.drop(columns=['Error', 'raw_text'], errors='ignore')
+        st.dataframe(df_view, use_container_width=True)
     
     if db_resumes:
         if st.button("Export All Data to CSV", use_container_width=True):
@@ -1032,7 +1054,6 @@ def show_match_section():
         with st.spinner("Computing matches..."):
             results = run_matching(jd_text, req_skills, use_faiss, w_skill)
             st.session_state.scored_results = results
-            
             save_matching_session(jd_text, req_skills, use_faiss, w_skill, shortlist_count, results)
             
     if st.session_state.scored_results:
@@ -1040,6 +1061,7 @@ def show_match_section():
 
 def run_matching(jd_text: str, req_skills_text: str, use_faiss: bool, w_skill: float):
     req_skills = [s.strip() for s in req_skills_text.split(",") if s.strip()]
+    st.session_state.req_skills_list = req_skills
     
     file_order = list(st.session_state.raw_texts.keys())
     cand_texts = [st.session_state.raw_texts.get(f, "") for f in file_order]
@@ -1103,13 +1125,7 @@ def show_match_results():
     with col1:
         st.subheader("Match Score Distribution")
         st.bar_chart(df.set_index('Name')['MatchScore'])
-    
-    with col2:
-        st.subheader("Skills vs Text Similarity")
-        chart_data = df[['SkillMatch', 'TextSim']]
-        chart_data.index = df['Name']
-        st.line_chart(chart_data)
-    
+
     st.subheader("Candidate Details")
     for i, candidate in enumerate(shortlisted):
         with st.expander(f"{i+1}. {candidate['Name']} - Score: {candidate['MatchScore']:.2%}"):
@@ -1187,7 +1203,7 @@ def show_chat_section():
                 context = build_context_from_state(max_chars, shortlist_only)
                 answer = ask_openai(prompt, context, model=model_choice)
                 
-                save_chat_history(prompt, answer, model_choice, context[:500])  # Save first 500 chars of context
+                save_chat_history(prompt, answer, model_choice, context[:500])
                 
                 st.subheader("AI Response")
                 st.write(answer)
@@ -1222,7 +1238,6 @@ def build_context_from_state(max_chars: int, shortlist_only: bool = False) -> st
     return "".join(chunks)
 
 def show_history_section():
-    """Show user history"""
     st.header("📊 Your Activity History")
     
     history = get_user_history()
@@ -1269,4 +1284,3 @@ def show_history_section():
 
 if __name__ == "__main__":
     main()
-    
