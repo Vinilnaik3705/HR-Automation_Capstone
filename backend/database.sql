@@ -1,14 +1,15 @@
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     role VARCHAR(50) DEFAULT 'user',
     is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE resume_files (
+CREATE TABLE IF NOT EXISTS resume_files (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     filename VARCHAR(500) NOT NULL,
@@ -16,10 +17,11 @@ CREATE TABLE resume_files (
     file_type VARCHAR(10),
     session_id VARCHAR(100),
     processed BOOLEAN DEFAULT FALSE,
-    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE resume_data (
+CREATE TABLE IF NOT EXISTS resume_data (
     id SERIAL PRIMARY KEY,
     resume_file_id INTEGER REFERENCES resume_files(id) ON DELETE CASCADE,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -29,12 +31,12 @@ CREATE TABLE resume_data (
     skills TEXT,
     extracted_text TEXT,
     raw_parsed_data JSONB,
-    interview_status VARCHAR(20),              
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
+    interview_status VARCHAR(20),
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE upload_sessions (
+CREATE TABLE IF NOT EXISTS upload_sessions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     session_id VARCHAR(100) UNIQUE NOT NULL,
@@ -44,10 +46,11 @@ CREATE TABLE upload_sessions (
     skills_text TEXT,
     status VARCHAR(50) DEFAULT 'processing',
     start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    end_time TIMESTAMP
+    end_time TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE matching_sessions (
+CREATE TABLE IF NOT EXISTS matching_sessions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     jd_text TEXT,
@@ -59,7 +62,7 @@ CREATE TABLE matching_sessions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE chat_history (
+CREATE TABLE IF NOT EXISTS chat_history (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     user_prompt TEXT NOT NULL,
@@ -69,7 +72,7 @@ CREATE TABLE chat_history (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE interviewers (
+CREATE TABLE IF NOT EXISTS interviewers (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -83,7 +86,7 @@ CREATE TABLE interviewers (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE interview_schedules (
+CREATE TABLE IF NOT EXISTS interview_schedules (
     id SERIAL PRIMARY KEY,
     candidate_name VARCHAR(255) NOT NULL,
     candidate_email VARCHAR(255) NOT NULL,
@@ -97,7 +100,7 @@ CREATE TABLE interview_schedules (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE interview_feedback (
+CREATE TABLE IF NOT EXISTS interview_feedback (
     id SERIAL PRIMARY KEY,
     interview_id INTEGER REFERENCES interview_schedules(id) ON DELETE CASCADE,
     interviewer_id INTEGER REFERENCES interviewers(id) ON DELETE CASCADE,
@@ -114,7 +117,7 @@ CREATE TABLE interview_feedback (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE app_logs (
+CREATE TABLE IF NOT EXISTS app_logs (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     action VARCHAR(255) NOT NULL,
@@ -124,7 +127,7 @@ CREATE TABLE app_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE scheduling_logs (
+CREATE TABLE IF NOT EXISTS scheduling_logs (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     action TEXT,
@@ -132,3 +135,34 @@ CREATE TABLE scheduling_logs (
     user_agent TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS job_descriptions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    required_skills TEXT,
+    experience_level VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS candidate_status (
+    id SERIAL PRIMARY KEY,
+    resume_data_id INTEGER REFERENCES resume_data(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL,
+    notes TEXT,
+    rating INTEGER CHECK (rating >= 1 AND rating <= 5),
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_resume_files_user_id ON resume_files(user_id);
+CREATE INDEX IF NOT EXISTS idx_resume_data_user_id ON resume_data(user_id);
+CREATE INDEX IF NOT EXISTS idx_resume_data_email ON resume_data(candidate_email);
+CREATE INDEX IF NOT EXISTS idx_interview_schedules_interviewer_id ON interview_schedules(interviewer_id);
+CREATE INDEX IF NOT EXISTS idx_interview_schedules_scheduled_time ON interview_schedules(scheduled_time);
+CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON chat_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_history_created_at ON chat_history(created_at);
+CREATE INDEX IF NOT EXISTS idx_upload_sessions_user_id ON upload_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_matching_sessions_user_id ON matching_sessions(user_id);
